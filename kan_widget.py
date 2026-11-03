@@ -401,6 +401,7 @@ class KanWindow(QMainWindow):
         self.active_worker: Worker | None = None
         self.operation_busy = False
         self.active_done_callback = None
+        self.proxy_recovery_pending = False
         self.gpu_name_cache: str | None = None
         self.last_net = psutil.net_io_counters()
         self.last_net_time = time.time()
@@ -414,6 +415,13 @@ class KanWindow(QMainWindow):
         self._load_apps()
         self._load_nodes()
         self._apply_window_flags()
+        if self.proxy_recovery_pending:
+            self.connect_button.setEnabled(False)
+            self.disconnect_button.setEnabled(True)
+            self._set_vpn_controls_enabled(False)
+            self.vpn_status.setText("●  نیاز به بازیابی پراکسی ویندوز")
+            self.vpn_detail.setText("بازیابی خودکار پراکسی در شروع برنامه موفق نشد. روی «قطع اتصال» بزن تا دوباره تلاش کنم.")
+            self.connection_badge.setText("●  بازیابی پراکسی لازم است")
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_metrics)
         self.timer.start(1000)
@@ -1403,6 +1411,7 @@ class KanWindow(QMainWindow):
             )
             return
         self._stop_engine()
+        self.proxy_recovery_pending = False
         self.connect_button.setEnabled(True)
         self.connect_button.setText("اتصال")
         self._set_vpn_controls_enabled(True)
@@ -1413,31 +1422,12 @@ class KanWindow(QMainWindow):
         self.connection_badge.setStyleSheet("")
 
     def _recover_stale_proxy(self):
-        # If the app or Windows was closed unexpectedly, restore the previous system proxy.
-        if PROXY_SNAPSHOT_FILE.exists():
-            self._restore_proxy_without_ui()
-
-    def _restore_proxy_without_ui(self):
-        if os.name != "nt" or not PROXY_SNAPSHOT_FILE.exists():
+        # A previous process may have exited before it could restore Windows proxy settings.
+        # Use the same restore path as the Disconnect button, including the persisted fallback.
+        if os.name != "nt":
             return
-        try:
-            snapshot = json.loads(PROXY_SNAPSHOT_FILE.read_text(encoding="utf-8"))
-            import winreg
-            key_path = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE) as key:
-                winreg.SetValueEx(key, "ProxyEnable", 0, winreg.REG_DWORD, int(snapshot.get("enabled", 0)))
-                if snapshot.get("server"):
-                    winreg.SetValueEx(key, "ProxyServer", 0, winreg.REG_SZ, str(snapshot["server"]))
-                else:
-                    try:
-                        winreg.DeleteValue(key, "ProxyServer")
-                    except FileNotFoundError:
-                        pass
-            self._notify_windows_proxy_change()
-            PROXY_SNAPSHOT_FILE.unlink(missing_ok=True)
-        except Exception:
-            # Leave the snapshot in place so the next launch can retry.
-            pass
+        if PROXY_SNAPSHOT_FILE.exists() or self.settings.get("proxy_snapshot"):
+            self.proxy_recovery_pending = not self._restore_windows_proxy()
 
     def _shutdown_cleanup(self):
         try:
