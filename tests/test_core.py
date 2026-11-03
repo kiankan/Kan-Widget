@@ -1,11 +1,15 @@
 import base64
 import json
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from kan_widget import (
     decode_subscription,
     fetch_subscription_text,
     format_bytes,
+    load_settings,
     parse_subscription,
     parse_uri,
     transport_from_query,
@@ -99,6 +103,33 @@ class ParserTests(unittest.TestCase):
     def test_format_bytes(self):
         self.assertEqual(format_bytes(0), "0.0 B/s")
         self.assertEqual(format_bytes(1024), "1.0 KB/s")
+
+    def test_malformed_saved_entries_are_ignored(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app_dir = Path(temp_dir)
+            settings_file = app_dir / "settings.json"
+            settings_file.write_text(
+                json.dumps({
+                    "apps": [None, {"name": "Editor", "path": "C:/Editor.exe"}, "bad-entry"],
+                    "nodes": [
+                        {"name": "valid", "outbound": {"type": "vless", "server": "example.com", "server_port": 443}},
+                        {"name": "invalid", "outbound": "not-an-object"},
+                        123,
+                    ],
+                    "tasks": [None, {"text": "Do work", "done": True}, {"text": 5}],
+                    "proxy_snapshot": "invalid",
+                }),
+                encoding="utf-8",
+            )
+            with patch("kan_widget.APP_DIR", app_dir), patch("kan_widget.SETTINGS_FILE", settings_file):
+                settings = load_settings()
+
+        self.assertEqual(len(settings["apps"]), 1)
+        self.assertEqual(settings["apps"][0]["name"], "Editor")
+        self.assertEqual(len(settings["nodes"]), 1)
+        self.assertEqual(settings["nodes"][0]["name"], "valid")
+        self.assertEqual(settings["tasks"], [{"text": "Do work", "done": True}])
+        self.assertIsNone(settings["proxy_snapshot"])
 
 
 if __name__ == "__main__":
