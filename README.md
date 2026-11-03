@@ -50,7 +50,7 @@ irm https://raw.githubusercontent.com/kiankan/Kan-Widget/main/install.ps1 | iex
 
 این دستور آخرین Release را دریافت می‌کند، فایل نصب را با SHA256 بررسی می‌کند، برنامه را در پوشه کاربر نصب می‌کند، میانبر دسکتاپ و Start Menu می‌سازد و برنامه را اجرا می‌کند. دسترسی Administrator لازم نیست.
 
-برای انتشار اولین نسخه، در GitHub به **Actions → Build Windows app → Run workflow** برو و تگ `v0.1.0` را منتشر کن. بعد از پایان موفق Workflow، دستور بالا قابل استفاده خواهد بود.
+برای انتشار اولین نسخه، در GitHub به **Actions → Build Windows app → Run workflow** برو و تگ `v0.1.1` را منتشر کن. بعد از پایان موفق Workflow، دستور بالا قابل استفاده خواهد بود.
 
 ## هسته VPN
 
