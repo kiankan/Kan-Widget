@@ -1415,18 +1415,18 @@ class KanWindow(QMainWindow):
         recovering = bool(self.proxy_recovery_pending)
         selected = self.dashboard_node_combo.currentText() if hasattr(self, "dashboard_node_combo") else ""
         self.dashboard_node_combo.setPlaceholderText("ابتدا اشتراک یا لینک سرور اضافه کن")
-        if connected:
-            self.dashboard_vpn_status.setText("●  پراکسی فعال است")
-            self.dashboard_vpn_status.setStyleSheet("color:#43D9B8; font-weight:700;")
-            self.dashboard_vpn_detail.setText(f"سرور فعال: {selected or 'انتخاب‌شده'}  •  127.0.0.1:{MIXED_PORT}")
-            self.dashboard_connect_button.setText("متصل")
-            self.dashboard_connect_button.setEnabled(False)
-            self.dashboard_disconnect_button.setEnabled(True)
-        elif recovering:
+        if recovering:
             self.dashboard_vpn_status.setText("●  نیاز به بازیابی پراکسی")
             self.dashboard_vpn_status.setStyleSheet("color:#F2B45B; font-weight:700;")
             self.dashboard_vpn_detail.setText("تنظیمات پراکسی ویندوز بازیابی نشده؛ برای تلاش مجدد قطع اتصال را بزن.")
             self.dashboard_connect_button.setText("اتصال")
+            self.dashboard_connect_button.setEnabled(False)
+            self.dashboard_disconnect_button.setEnabled(True)
+        elif connected:
+            self.dashboard_vpn_status.setText("●  پراکسی فعال است")
+            self.dashboard_vpn_status.setStyleSheet("color:#43D9B8; font-weight:700;")
+            self.dashboard_vpn_detail.setText(f"سرور فعال: {selected or 'انتخاب‌شده'}  •  127.0.0.1:{MIXED_PORT}")
+            self.dashboard_connect_button.setText("متصل")
             self.dashboard_connect_button.setEnabled(False)
             self.dashboard_disconnect_button.setEnabled(True)
         else:
@@ -1777,6 +1777,7 @@ class KanWindow(QMainWindow):
                 self._set_vpn_controls_enabled(True)
             else:
                 # Keep sing-box alive if Windows may still point at it; allow retrying restore.
+                self.proxy_recovery_pending = True
                 self.connect_button.setEnabled(False)
                 self.disconnect_button.setEnabled(True)
                 self._set_vpn_controls_enabled(False)
