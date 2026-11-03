@@ -32,6 +32,10 @@ py -3 -m pip install -r requirements.txt
 py -3 kan_widget.py
 ```
 
+## تست خودکار پروژه
+
+با هر push به شاخه `main`، GitHub Actions تست‌های parser و راه‌اندازی اولیه رابط ویندوز را اجرا می‌کند. پیش از انتشار هم همین تست‌ها در Workflow ساخت ویندوز تکرار می‌شوند.
+
 ## ساخت فایل اجرایی ویندوز
 
 فایل `build_windows.bat` را اجرا کن. خروجی در مسیر `dist\KanWidget\KanWidget.exe` قرار می‌گیرد.
