@@ -25,7 +25,7 @@ try {
         $ReleaseVersion = [version]$Matches['version']
     }
     if ($null -eq $ReleaseVersion -or $ReleaseVersion -lt [version]'0.2.0') {
-        throw "The latest published release is outdated. The Pro Dashboard v0.2.0 build has not been published yet; installation was cancelled to avoid reinstalling the known-buggy v0.1.0."
+        throw "The latest published release is outdated. The Pro Dashboard v0.2.0 build has not been published yet; installation was cancelled to avoid installing an older release."
     }
 
     $ZipAsset = $Release.assets | Where-Object { $_.name -eq 'KanWidget-Windows.zip' } | Select-Object -First 1
