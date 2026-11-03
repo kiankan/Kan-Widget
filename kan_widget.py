@@ -1104,13 +1104,15 @@ class KanWindow(QMainWindow):
         for i, app in enumerate(apps):
             tile = self._app_tile(app, i)
             self.apps_grid.addWidget(tile, i // 3, i % 3)
-            if i < 6:
-                self.quick_apps.addWidget(self._app_tile(app, i, compact=True), i // 3, i % 3)
+            if i < 8:
+                self.quick_apps.addWidget(self._app_tile(app, i, compact=True), i // 4, i % 4)
         if not apps:
             empty = QLabel("هنوز برنامه‌ای اضافه نکردی. از دکمه «افزودن برنامه» شروع کن.")
             empty.setObjectName("muted")
             self.apps_grid.addWidget(empty, 0, 0)
-            self.quick_apps.addWidget(QLabel("برای دسترسی سریع، برنامه دلخواهت را اضافه کن."), 0, 0)
+            empty_quick = QLabel("برای ساخت نوار دسترسی سریع، برنامه‌های دلخواهت را اضافه کن.")
+            empty_quick.setObjectName("mutedSmall")
+            self.quick_apps.addWidget(empty_quick, 0, 0, 1, 4)
 
     def _app_tile(self, app: dict[str, str], index: int, compact: bool = False) -> QFrame:
         tile = QFrame()
@@ -1210,28 +1212,94 @@ class KanWindow(QMainWindow):
     def _load_nodes(self):
         if not hasattr(self, "node_combo"):
             return
+        nodes = self.settings.get("nodes", [])
+        selected = self.settings.get("selected_node", "")
+        selected_index = next((i for i, node in enumerate(nodes) if node.get("name") == selected), 0 if nodes else -1)
+
         self.node_combo.blockSignals(True)
         self.node_combo.clear()
-        nodes = self.settings.get("nodes", [])
         for node in nodes:
             self.node_combo.addItem(node.get("name", "Server"))
-        selected = self.settings.get("selected_node", "")
-        if selected:
-            idx = next((i for i, n in enumerate(nodes) if n.get("name") == selected), -1)
-            if idx >= 0:
-                self.node_combo.setCurrentIndex(idx)
-        self.node_count_label.setText(f"{len(nodes)} سرور")
+        if selected_index >= 0:
+            self.node_combo.setCurrentIndex(selected_index)
         self.node_combo.blockSignals(False)
-        self._on_node_changed(self.node_combo.currentIndex())
+
+        if hasattr(self, "dashboard_node_combo"):
+            self.dashboard_node_combo.blockSignals(True)
+            self.dashboard_node_combo.clear()
+            for node in nodes:
+                self.dashboard_node_combo.addItem(node.get("name", "Server"))
+            if selected_index >= 0:
+                self.dashboard_node_combo.setCurrentIndex(selected_index)
+            self.dashboard_node_combo.blockSignals(False)
+
+        if hasattr(self, "node_count_label"):
+            self.node_count_label.setText(f"{len(nodes)} سرور")
+        if selected_index >= 0:
+            self._on_node_changed(selected_index)
+        self._refresh_dashboard_vpn()
 
     def _on_node_changed(self, index: int):
         nodes = self.settings.get("nodes", [])
         if 0 <= index < len(nodes):
             self.settings["selected_node"] = nodes[index].get("name", "")
             save_settings(self.settings)
+            if hasattr(self, "dashboard_node_combo") and self.dashboard_node_combo.currentIndex() != index:
+                self.dashboard_node_combo.blockSignals(True)
+                self.dashboard_node_combo.setCurrentIndex(index)
+                self.dashboard_node_combo.blockSignals(False)
+        self._refresh_dashboard_vpn()
+
+    def _on_dashboard_node_changed(self, index: int):
+        if not hasattr(self, "node_combo"):
+            return
+        if 0 <= index < self.node_combo.count() and self.node_combo.currentIndex() != index:
+            self.node_combo.setCurrentIndex(index)
+        else:
+            self._on_node_changed(index)
+
+    def _refresh_dashboard_vpn(self):
+        if not hasattr(self, "dashboard_vpn_status"):
+            return
+        nodes = self.settings.get("nodes", [])
+        connected = bool(self.engine_process and self.engine_process.poll() is None)
+        recovering = bool(self.proxy_recovery_pending)
+        selected = self.dashboard_node_combo.currentText() if hasattr(self, "dashboard_node_combo") else ""
+        self.dashboard_node_combo.setPlaceholderText("ابتدا اشتراک یا لینک سرور اضافه کن")
+        if connected:
+            self.dashboard_vpn_status.setText("●  پراکسی فعال است")
+            self.dashboard_vpn_status.setStyleSheet("color:#43D9B8; font-weight:700;")
+            self.dashboard_vpn_detail.setText(f"سرور فعال: {selected or 'انتخاب‌شده'}  •  127.0.0.1:{MIXED_PORT}")
+            self.dashboard_connect_button.setText("متصل")
+            self.dashboard_connect_button.setEnabled(False)
+            self.dashboard_disconnect_button.setEnabled(True)
+        elif recovering:
+            self.dashboard_vpn_status.setText("●  نیاز به بازیابی پراکسی")
+            self.dashboard_vpn_status.setStyleSheet("color:#F2B45B; font-weight:700;")
+            self.dashboard_vpn_detail.setText("تنظیمات پراکسی ویندوز بازیابی نشده؛ برای تلاش مجدد قطع اتصال را بزن.")
+            self.dashboard_connect_button.setText("اتصال")
+            self.dashboard_connect_button.setEnabled(False)
+            self.dashboard_disconnect_button.setEnabled(True)
+        else:
+            self.dashboard_vpn_status.setText("●  اتصال برقرار نیست")
+            self.dashboard_vpn_status.setStyleSheet("")
+            self.dashboard_vpn_detail.setText(
+                f"{len(nodes)} سرور آماده است" if nodes else "برای شروع، از بخش مدیریت فیلترشکن یک اشتراک اضافه کن."
+            )
+            self.dashboard_connect_button.setText("اتصال")
+            self.dashboard_connect_button.setEnabled(bool(nodes) and not self.operation_busy)
+            self.dashboard_disconnect_button.setEnabled(False)
+
+        controls_enabled = not connected and not recovering and not self.operation_busy
+        self.dashboard_node_combo.setEnabled(controls_enabled)
+        self.dashboard_update_button.setEnabled(controls_enabled and bool(self.settings.get("subscription_url")))
+        self.dashboard_manage_button.setEnabled(not self.operation_busy)
+        if self.operation_busy:
+            self.dashboard_connect_button.setEnabled(False)
+            self.dashboard_update_button.setEnabled(False)
 
     def _set_vpn_controls_enabled(self, enabled: bool):
-        for control_name in ("node_combo", "update_sub_button", "add_link_button", "remove_nodes_button"):
+        for control_name in ("node_combo", "dashboard_node_combo", "update_sub_button", "dashboard_update_button", "add_link_button", "remove_nodes_button"):
             control = getattr(self, control_name, None)
             if control is not None:
                 control.setEnabled(enabled)
