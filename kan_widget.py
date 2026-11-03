@@ -121,6 +121,9 @@ def query_first(query: dict[str, list[str]], *names: str, default: str = "") -> 
 
 def transport_from_query(q: dict[str, list[str]]) -> dict[str, Any] | None:
     net = query_first(q, "type", "network", default="tcp").lower()
+    header_type = query_first(q, "headerType")
+    if header_type and header_type.lower() not in ("none",):
+        raise ValueError(f"هدر TCP از نوع {header_type} هنوز پشتیبانی نمی‌شود")
     if net in ("tcp", "none", ""):
         return None
     if net == "ws":
@@ -794,15 +797,19 @@ class KanWindow(QMainWindow):
 
     def update_metrics(self):
         if self.engine_process and self.engine_process.poll() is not None:
-            self._restore_windows_proxy()
-            self.engine_process = None
-            self.connect_button.setEnabled(True)
-            self.connect_button.setText("اتصال")
-            self.disconnect_button.setEnabled(False)
-            self.vpn_status.setText("●  اتصال برقرار نیست")
-            self.vpn_detail.setText("هسته VPN متوقف شد؛ پراکسی قبلی ویندوز بازیابی شد.")
-            self.connection_badge.setText("●  VPN قطع است")
-            self.connection_badge.setStyleSheet("")
+            if self._restore_windows_proxy():
+                self.engine_process = None
+                self.connect_button.setEnabled(True)
+                self.connect_button.setText("اتصال")
+                self.disconnect_button.setEnabled(False)
+                self.vpn_status.setText("●  اتصال برقرار نیست")
+                self.vpn_detail.setText("هسته VPN متوقف شد و پراکسی قبلی ویندوز بازیابی شد.")
+                self.connection_badge.setText("●  VPN قطع است")
+                self.connection_badge.setStyleSheet("")
+            else:
+                self.vpn_status.setText("●  بازیابی پراکسی ناموفق")
+                self.vpn_detail.setText("هسته VPN متوقف شده، اما پراکسی ویندوز هنوز بازیابی نشده است. برای تلاش مجدد روی قطع اتصال بزن.")
+                self.disconnect_button.setEnabled(True)
         now = time.strftime("%H:%M")
         self.clock_label.setText(now)
         self.date_label.setText(time.strftime("%A  •  %d %B %Y"))
@@ -999,10 +1006,18 @@ class KanWindow(QMainWindow):
         worker.done.connect(thread.quit)
         worker.failed.connect(thread.quit)
         thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._worker_thread_finished)
         self.active_thread, self.active_worker = thread, worker
         thread.start()
         return True
+
+    def _worker_thread_finished(self):
+        finished_thread = self.sender()
+        if finished_thread is self.active_thread:
+            self.active_thread = None
+            self.active_worker = None
+        if finished_thread:
+            finished_thread.deleteLater()
 
     def _worker_succeeded(self, result):
         callback = self.active_done_callback
@@ -1414,7 +1429,7 @@ class KanWindow(QMainWindow):
             pass
 
     def closeEvent(self, event):
-        if self.operation_busy:
+        if self.operation_busy or (self.active_thread and self.active_thread.isRunning()):
             QMessageBox.information(
                 self, "عملیات در حال اجرا",
                 "تا پایان دریافت اشتراک یا آماده‌سازی اتصال، برنامه را نبند.",
