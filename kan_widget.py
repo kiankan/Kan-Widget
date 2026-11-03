@@ -806,10 +806,12 @@ class KanWindow(QMainWindow):
                 self.vpn_detail.setText("هسته VPN متوقف شد و پراکسی قبلی ویندوز بازیابی شد.")
                 self.connection_badge.setText("●  VPN قطع است")
                 self.connection_badge.setStyleSheet("")
+                self._set_vpn_controls_enabled(True)
             else:
                 self.vpn_status.setText("●  بازیابی پراکسی ناموفق")
                 self.vpn_detail.setText("هسته VPN متوقف شده، اما پراکسی ویندوز هنوز بازیابی نشده است. برای تلاش مجدد روی قطع اتصال بزن.")
                 self.disconnect_button.setEnabled(True)
+                self._set_vpn_controls_enabled(False)
         now = time.strftime("%H:%M")
         self.clock_label.setText(now)
         self.date_label.setText(time.strftime("%A  •  %d %B %Y"))
@@ -989,12 +991,18 @@ class KanWindow(QMainWindow):
             self.settings["selected_node"] = nodes[index].get("name", "")
             save_settings(self.settings)
 
+    def _set_vpn_controls_enabled(self, enabled: bool):
+        for control_name in ("node_combo", "update_sub_button", "add_link_button", "remove_nodes_button"):
+            control = getattr(self, control_name, None)
+            if control is not None:
+                control.setEnabled(enabled)
+
     def _run_worker(self, fn, on_done):
         if self.operation_busy or (self.active_thread and self.active_thread.isRunning()):
             QMessageBox.information(self, "در حال انجام", "یک عملیات دیگر هنوز در حال اجراست.")
             return False
         self.operation_busy = True
-        self.update_sub_button.setEnabled(False)
+        self._set_vpn_controls_enabled(False)
         self.connect_button.setEnabled(False)
         thread = QThread(self)
         worker = Worker(fn)
@@ -1027,6 +1035,9 @@ class KanWindow(QMainWindow):
         if self.engine_process is None or self.engine_process.poll() is not None:
             self.connect_button.setEnabled(True)
             self.connect_button.setText("اتصال")
+            self._set_vpn_controls_enabled(True)
+        else:
+            self._set_vpn_controls_enabled(False)
         if callback:
             callback(result)
 
@@ -1038,6 +1049,9 @@ class KanWindow(QMainWindow):
         if self.engine_process is None or self.engine_process.poll() is not None:
             self.connect_button.setEnabled(True)
             self.connect_button.setText("اتصال")
+            self._set_vpn_controls_enabled(True)
+        else:
+            self._set_vpn_controls_enabled(False)
         QMessageBox.warning(self, "عملیات ناموفق", message)
 
     def update_subscription(self):
@@ -1284,6 +1298,7 @@ class KanWindow(QMainWindow):
             )
             self.connection_badge.setText("●  VPN فعال است")
             self.connection_badge.setStyleSheet("color:#5CE0BE;")
+            self._set_vpn_controls_enabled(False)
         except Exception as exc:
             restored = self._restore_windows_proxy()
             if restored:
@@ -1291,10 +1306,12 @@ class KanWindow(QMainWindow):
                 self.connect_button.setEnabled(True)
                 self.connect_button.setText("اتصال")
                 self.disconnect_button.setEnabled(False)
+                self._set_vpn_controls_enabled(True)
             else:
                 # Keep sing-box alive if Windows may still point at it; allow retrying restore.
                 self.connect_button.setEnabled(False)
                 self.disconnect_button.setEnabled(True)
+                self._set_vpn_controls_enabled(False)
                 self.vpn_status.setText("●  نیاز به بازیابی پراکسی ویندوز")
                 self.vpn_detail.setText("تنظیمات پراکسی کامل بازیابی نشد. قطع اتصال را دوباره امتحان کن.")
             QMessageBox.warning(self, "تنظیم پراکسی ویندوز ناموفق", str(exc))
@@ -1388,6 +1405,7 @@ class KanWindow(QMainWindow):
         self._stop_engine()
         self.connect_button.setEnabled(True)
         self.connect_button.setText("اتصال")
+        self._set_vpn_controls_enabled(True)
         self.disconnect_button.setEnabled(False)
         self.vpn_status.setText("●  اتصال برقرار نیست")
         self.vpn_detail.setText("اتصال قطع شد و تنظیمات پراکسی قبلی ویندوز بازیابی شد.")
