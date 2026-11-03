@@ -69,9 +69,43 @@ def load_settings() -> dict[str, Any]:
             except OSError:
                 pass
     settings = {**DEFAULT_SETTINGS, **data}
-    for key in ("apps", "nodes", "tasks"):
-        if not isinstance(settings.get(key), list):
-            settings[key] = []
+
+    raw_apps = settings.get("apps")
+    if not isinstance(raw_apps, list):
+        raw_apps = []
+    settings["apps"] = [
+        {
+            "name": item.get("name") if isinstance(item.get("name"), str) else Path(item["path"]).stem,
+            "path": item["path"],
+            "icon": item.get("icon", "▣") if isinstance(item.get("icon", "▣"), str) else "▣",
+        }
+        for item in raw_apps
+        if isinstance(item, dict) and isinstance(item.get("path"), str) and item.get("path")
+    ]
+
+    raw_nodes = settings.get("nodes")
+    if not isinstance(raw_nodes, list):
+        raw_nodes = []
+    settings["nodes"] = [
+        {
+            **item,
+            "name": item.get("name") if isinstance(item.get("name"), str) and item.get("name") else "Server",
+        }
+        for item in raw_nodes
+        if isinstance(item, dict)
+        and isinstance(item.get("outbound"), dict)
+        and item["outbound"].get("type") in ("vless", "vmess", "trojan", "shadowsocks")
+    ]
+
+    raw_tasks = settings.get("tasks")
+    if not isinstance(raw_tasks, list):
+        raw_tasks = []
+    settings["tasks"] = [
+        {"text": item["text"], "done": bool(item.get("done", False))}
+        for item in raw_tasks
+        if isinstance(item, dict) and isinstance(item.get("text"), str) and item.get("text").strip()
+    ]
+
     for key in ("subscription_url", "selected_node", "notes"):
         if not isinstance(settings.get(key), str):
             settings[key] = ""
@@ -79,6 +113,13 @@ def load_settings() -> dict[str, Any]:
         settings["theme"] = "dark"
     if not isinstance(settings.get("always_on_top"), bool):
         settings["always_on_top"] = False
+    snapshot = settings.get("proxy_snapshot")
+    if snapshot is not None and (
+        not isinstance(snapshot, dict)
+        or not isinstance(snapshot.get("server", ""), str)
+        or snapshot.get("enabled") not in (0, 1, False, True)
+    ):
+        settings["proxy_snapshot"] = None
     return settings
 
 
