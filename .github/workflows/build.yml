@@ -40,6 +40,20 @@ jobs:
       - name: Build executable
         run: python -m PyInstaller --noconfirm --clean --windowed --name KanWidget kan_widget.py
 
+      - name: Smoke test packaged executable
+        shell: pwsh
+        run: |
+          $Exe = (Resolve-Path 'dist/KanWidget/KanWidget.exe').Path
+          $WorkingDirectory = Split-Path -Parent $Exe
+          $Process = Start-Process -FilePath $Exe -WorkingDirectory $WorkingDirectory -PassThru
+          Start-Sleep -Seconds 8
+          $Process.Refresh()
+          if ($Process.HasExited) {
+            throw "Packaged KanWidget.exe exited early with code $($Process.ExitCode)."
+          }
+          Stop-Process -Id $Process.Id -Force
+          Write-Host "Packaged Windows executable started and stayed alive."
+
       - name: Package Windows build
         shell: pwsh
         run: |
