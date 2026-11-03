@@ -1028,10 +1028,20 @@ class KanWindow(QMainWindow):
                 background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #32CBB7, stop:1 #70A9F5);
                 border-radius: 4px;
             }}
-            #proCard, #panel, #connectPanel, #metricCard {{
+            #proCard, #panel, #connectPanel, #metricCard, #appTile {{
                 background: {panel};
                 border: 1px solid {border};
                 border-radius: 15px;
+            }}
+            #appTile:hover {{
+                border-color: #45CDBA;
+                background: {panel};
+            }}
+            #appIcon {{
+                color: #4BD8C4;
+                font-size: 21pt;
+                min-width: 34px;
+                min-height: 34px;
             }}
             #vpnWidget {{
                 background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #122838, stop:1 #142D34);
