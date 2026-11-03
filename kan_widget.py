@@ -21,11 +21,12 @@ from typing import Any
 import psutil
 import requests
 from PySide6.QtCore import QObject, QThread, QTimer, Qt, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
     QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QScrollArea,
     QStackedWidget, QVBoxLayout, QWidget, QInputDialog, QTextEdit, QCheckBox,
+    QProgressBar,
 )
 
 APP_NAME = "Kan Widget"
@@ -431,6 +432,58 @@ class MetricCard(QFrame):
     def set_values(self, value: str, subtitle: str = ""):
         self.value_label.setText(value)
         self.subtitle_label.setText(subtitle)
+
+
+class UsageChart(QWidget):
+    """Lightweight live CPU/RAM history chart drawn with QPainter."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.cpu_values: list[float] = [0.0] * 48
+        self.ram_values: list[float] = [0.0] * 48
+        self.setMinimumHeight(176)
+        self.setStyleSheet("background: transparent;")
+
+    def add_sample(self, cpu: float, ram: float):
+        self.cpu_values.append(max(0.0, min(100.0, float(cpu))))
+        self.ram_values.append(max(0.0, min(100.0, float(ram))))
+        self.cpu_values = self.cpu_values[-48:]
+        self.ram_values = self.ram_values[-48:]
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        area = self.rect().adjusted(8, 8, -8, -8)
+        if area.width() <= 0 or area.height() <= 0:
+            return
+
+        grid_pen = QPen(QColor("#28374A"), 1)
+        grid_pen.setStyle(Qt.DotLine)
+        painter.setPen(grid_pen)
+        for row in range(5):
+            y = area.top() + (area.height() * row / 4)
+            painter.drawLine(int(area.left()), int(y), int(area.right()), int(y))
+        for col in range(7):
+            x = area.left() + (area.width() * col / 6)
+            painter.drawLine(int(x), int(area.top()), int(x), int(area.bottom()))
+
+        def draw_series(values: list[float], color: str):
+            path = QPainterPath()
+            count = max(1, len(values) - 1)
+            for index, value in enumerate(values):
+                x = area.left() + area.width() * index / count
+                y = area.bottom() - area.height() * (value / 100.0)
+                if index == 0:
+                    path.moveTo(x, y)
+                else:
+                    path.lineTo(x, y)
+            painter.setPen(QPen(QColor(color), 2.5, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            painter.drawPath(path)
+
+        draw_series(self.ram_values, "#A78BFA")
+        draw_series(self.cpu_values, "#40D8C3")
+        painter.end()
 
 
 class KanWindow(QMainWindow):
