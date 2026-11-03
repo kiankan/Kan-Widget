@@ -1071,96 +1071,212 @@ class KanWindow(QMainWindow):
     def _singbox_binary(self) -> Path:
         ENGINE_DIR.mkdir(parents=True, exist_ok=True)
         candidates = list(ENGINE_DIR.glob("sing-box*.exe"))
-        if candidates:
-            return candidates[0]
-        response = requests.get(GITHUB_API, timeout=20, headers={"Accept": "application/vnd.github+json"})
+        for candidate in candidates:
+            try:
+                result = subprocess.run(
+                    [str(candidate), "version"],
+                    capture_output=True, text=True, timeout=8,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                if result.returncode == 0:
+                    return candidate
+            except Exception:
+                pass
+            try:
+                candidate.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+        response = requests.get(
+            GITHUB_API, timeout=(10, 20),
+            headers={"Accept": "application/vnd.github+json", "User-Agent": f"KanWidget/{APP_VERSION}"},
+        )
         response.raise_for_status()
         release = response.json()
         machine = platform.machine().lower()
-        arch = "arm64" if "arm" in machine or "aarch64" in machine else "amd64"
-        asset = next((a for a in release.get("assets", [])
-                      if a.get("name", "").lower().endswith(f"windows-{arch}.zip")
-                      and "windows" in a.get("name", "").lower()), None)
+        if "arm" in machine or "aarch64" in machine:
+            arch = "arm64"
+        elif sys.maxsize > 2**32:
+            arch = "amd64"
+        else:
+            arch = "386"
+        asset = next((
+            item for item in release.get("assets", [])
+            if item.get("name", "").lower().endswith(f"windows-{arch}.zip")
+        ), None)
         if not asset:
-            raise RuntimeError("نسخه ویندوز هسته sing-box در انتشار رسمی GitHub پیدا نشد.")
+            raise RuntimeError(f"نسخه ویندوز sing-box برای معماری {arch} در انتشار رسمی پیدا نشد.")
+
+        digest_text = str(asset.get("digest") or "")
+        match = re.fullmatch(r"sha256:([0-9a-fA-F]{64})", digest_text)
+        if not match:
+            raise RuntimeError("GitHub برای فایل هسته VPN مقدار SHA-256 معتبر ارائه نکرد؛ دانلود لغو شد.")
+        expected_digest = match.group(1).lower()
         archive_path = ENGINE_DIR / "sing-box.zip"
-        with requests.get(asset["browser_download_url"], stream=True, timeout=60) as download:
-            download.raise_for_status()
-            with archive_path.open("wb") as f:
-                for chunk in download.iter_content(1024 * 128):
-                    if chunk:
-                        f.write(chunk)
-        with zipfile.ZipFile(archive_path) as zf:
-            exe_name = next((n for n in zf.namelist() if n.lower().endswith("sing-box.exe")), None)
-            if not exe_name:
-                raise RuntimeError("فایل اجرایی sing-box داخل بسته پیدا نشد.")
-            extracted = zf.extract(exe_name, ENGINE_DIR)
-            target = ENGINE_DIR / "sing-box.exe"
-            shutil.move(extracted, target)
-        archive_path.unlink(missing_ok=True)
-        return ENGINE_DIR / "sing-box.exe"
+        partial_path = ENGINE_DIR / "sing-box.zip.part"
+        target = ENGINE_DIR / "sing-box.exe"
+        target_partial = ENGINE_DIR / "sing-box.exe.part"
+        hasher = hashlib.sha256()
+        downloaded = 0
+        try:
+            with requests.get(asset["browser_download_url"], stream=True, timeout=(10, 60)) as download:
+                download.raise_for_status()
+                with partial_path.open("wb") as stream:
+                    for chunk in download.iter_content(1024 * 128):
+                        if chunk:
+                            downloaded += len(chunk)
+                            hasher.update(chunk)
+                            stream.write(chunk)
+            expected_size = int(asset.get("size") or 0)
+            if expected_size and downloaded != expected_size:
+                raise RuntimeError("حجم فایل دانلودشده با اطلاعات GitHub مطابقت ندارد.")
+            if hasher.hexdigest().lower() != expected_digest:
+                raise RuntimeError("بررسی SHA-256 هسته VPN ناموفق بود؛ فایل اجرا نخواهد شد.")
+            os.replace(partial_path, archive_path)
+
+            with zipfile.ZipFile(archive_path) as archive:
+                exe_member = next((
+                    name for name in archive.namelist()
+                    if PurePosixPath(name).name.lower() == "sing-box.exe"
+                ), None)
+                if not exe_member:
+                    raise RuntimeError("فایل sing-box.exe داخل بسته رسمی پیدا نشد.")
+                # Copy only the executable; do not extract arbitrary archive paths.
+                with archive.open(exe_member) as source, target_partial.open("wb") as destination:
+                    shutil.copyfileobj(source, destination)
+            os.replace(target_partial, target)
+        finally:
+            partial_path.unlink(missing_ok=True)
+            archive_path.unlink(missing_ok=True)
+            target_partial.unlink(missing_ok=True)
+        return target
 
     def _make_config(self, node: dict[str, Any]) -> dict[str, Any]:
         outbound = dict(node["outbound"])
         outbound["tag"] = "selected-proxy"
         return {
             "log": {"level": "warn", "timestamp": True},
-            "inbounds": [{"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": MIXED_PORT}],
+            "inbounds": [{
+                "type": "mixed", "tag": "mixed-in",
+                "listen": "127.0.0.1", "listen_port": MIXED_PORT,
+            }],
             "outbounds": [outbound, {"type": "direct", "tag": "direct"}],
             "route": {"auto_detect_interface": True, "final": "selected-proxy"},
         }
 
+    def _read_engine_log_tail(self) -> str:
+        try:
+            lines = ENGINE_LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
+            return "\n".join(lines[-16:])[-1800:]
+        except OSError:
+            return ""
+
     def connect_vpn(self):
+        if os.name != "nt":
+            QMessageBox.warning(self, "سیستم‌عامل پشتیبانی‌نشده", "اتصال پراکسی ویندوز فقط روی Windows 10/11 فعال است.")
+            return
+        if self.engine_process and self.engine_process.poll() is None:
+            return
         nodes = self.settings.get("nodes", [])
         index = self.node_combo.currentIndex()
         if not nodes or index < 0:
             QMessageBox.information(self, "انتخاب سرور", "ابتدا یک اشتراک وارد یا یک لینک سرور اضافه کن.")
             return
         node = nodes[index]
-        self.connect_button.setEnabled(False)
-        self.connect_button.setText("در حال آماده‌سازی...")
 
         def start():
             binary = self._singbox_binary()
             config = self._make_config(node)
-            VPN_CONFIG_FILE.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
-            return str(binary), str(VPN_CONFIG_FILE), node.get("name", "Server")
+            temporary_config = VPN_CONFIG_FILE.with_suffix(".tmp")
+            temporary_config.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.replace(temporary_config, VPN_CONFIG_FILE)
 
-        self._run_worker(start, self._start_engine)
+            check = subprocess.run(
+                [str(binary), "check", "-c", str(VPN_CONFIG_FILE)],
+                capture_output=True, text=True, timeout=20,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if check.returncode != 0:
+                detail = (check.stderr or check.stdout or "خطای نامشخص در پیکربندی").strip()
+                raise RuntimeError(f"پیکربندی سرور توسط sing-box تأیید نشد:\n{detail[-1400:]}")
+
+            try:
+                with socket.create_connection(("127.0.0.1", MIXED_PORT), timeout=0.25):
+                    raise RuntimeError(f"پورت محلی {MIXED_PORT} قبلاً توسط برنامه دیگری اشغال شده است.")
+            except OSError:
+                pass
+
+            ENGINE_DIR.mkdir(parents=True, exist_ok=True)
+            process = None
+            try:
+                with ENGINE_LOG_FILE.open("w", encoding="utf-8") as log_stream:
+                    process = subprocess.Popen(
+                        [str(binary), "run", "-c", str(VPN_CONFIG_FILE)],
+                        stdout=log_stream, stderr=subprocess.STDOUT,
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    )
+                deadline = time.time() + 12
+                ready = False
+                while time.time() < deadline:
+                    if process.poll() is not None:
+                        detail = self._read_engine_log_tail()
+                        message = "هسته VPN متوقف شد."
+                        if detail:
+                            message += f"\n\nگزارش sing-box:\n{detail}"
+                        raise RuntimeError(message)
+                    try:
+                        with socket.create_connection(("127.0.0.1", MIXED_PORT), timeout=0.3):
+                            ready = True
+                            break
+                    except OSError:
+                        time.sleep(0.25)
+                if not ready:
+                    detail = self._read_engine_log_tail()
+                    message = "پورت پراکسی محلی در زمان مقرر آماده نشد."
+                    if detail:
+                        message += f"\n\nگزارش sing-box:\n{detail}"
+                    raise RuntimeError(message)
+                return process, node.get("name", "Server")
+            except Exception:
+                if process and process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                raise
+
+        if self._run_worker(start, self._start_engine):
+            self.connect_button.setText("در حال آماده‌سازی...")
 
     def _start_engine(self, data):
-        binary, config, name = data
+        process, name = data
+        self.engine_process = process
         try:
-            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            self.engine_process = subprocess.Popen([binary, "run", "-c", config], stdout=subprocess.DEVNULL,
-                                                   stderr=subprocess.DEVNULL, creationflags=creationflags)
-            deadline = time.time() + 9
-            ready = False
-            while time.time() < deadline:
-                if self.engine_process.poll() is not None:
-                    raise RuntimeError("هسته VPN اجرا نشد. احتمالاً لینک سرور یا تنظیمات آن با نسخه فعلی سازگار نیست.")
-                try:
-                    with socket.create_connection(("127.0.0.1", MIXED_PORT), timeout=0.3):
-                        ready = True
-                        break
-                except OSError:
-                    time.sleep(0.25)
-            if not ready:
-                raise RuntimeError("هسته VPN اجرا شد اما پورت محلی آماده نشد.")
             self._enable_windows_proxy()
             self.connect_button.setEnabled(False)
-            self.connect_button.setText("متصل شد")
+            self.connect_button.setText("پراکسی فعال")
             self.disconnect_button.setEnabled(True)
-            self.vpn_status.setText("●  اتصال برقرار است")
-            self.vpn_detail.setText(f"سرور فعال: {name}  •  پراکسی محلی: 127.0.0.1:{MIXED_PORT}")
-            self.connection_badge.setText("●  VPN متصل است")
+            self.vpn_status.setText("●  پراکسی محلی فعال است")
+            self.vpn_detail.setText(
+                f"سرور انتخابی: {name}  •  پراکسی محلی: 127.0.0.1:{MIXED_PORT}  •  اتصال مقصد با درخواست واقعی برنامه‌ها مشخص می‌شود."
+            )
+            self.connection_badge.setText("●  VPN فعال است")
             self.connection_badge.setStyleSheet("color:#5CE0BE;")
         except Exception as exc:
-            self._restore_windows_proxy()
-            self._stop_engine()
-            self.connect_button.setEnabled(True)
-            self.connect_button.setText("اتصال")
-            QMessageBox.warning(self, "اتصال ناموفق", str(exc))
+            restored = self._restore_windows_proxy()
+            if restored:
+                self._stop_engine()
+                self.connect_button.setEnabled(True)
+                self.connect_button.setText("اتصال")
+                self.disconnect_button.setEnabled(False)
+            else:
+                # Keep sing-box alive if Windows may still point at it; allow retrying restore.
+                self.connect_button.setEnabled(False)
+                self.disconnect_button.setEnabled(True)
+                self.vpn_status.setText("●  نیاز به بازیابی پراکسی ویندوز")
+                self.vpn_detail.setText("تنظیمات پراکسی کامل بازیابی نشد. قطع اتصال را دوباره امتحان کن.")
+            QMessageBox.warning(self, "تنظیم پراکسی ویندوز ناموفق", str(exc))
 
     def _enable_windows_proxy(self):
         if os.name != "nt":
