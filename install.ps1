@@ -1,33 +1,101 @@
 $ErrorActionPreference = 'Stop'
-$DefaultRepo = 'kiankan/Kan-Widget'
-$EnteredRepo = Read-Host "GitHub repository [$DefaultRepo]"
-$Repo = if ([string]::IsNullOrWhiteSpace($EnteredRepo)) { $DefaultRepo } else { $EnteredRepo.Trim() }
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-if ($Repo -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') {
-    throw 'Invalid repository. Enter it as username/repository.'
+$Repo = 'kiankan/Kan-Widget'
+$ApiHeaders = @{
+    'Accept' = 'application/vnd.github+json'
+    'User-Agent' = 'KanWidget-Installer'
 }
 
-$Url = "https://github.com/$Repo/releases/latest/download/KanWidget-Windows.zip"
-$Temp = Join-Path $env:TEMP 'KanWidget-Install'
-$Dest = Join-Path $env:LOCALAPPDATA 'Programs\KanWidget'
-$ZipPath = Join-Path $Temp 'KanWidget-Windows.zip'
+function Write-Step([string]$Message) {
+    Write-Host "[Kan Widget] $Message" -ForegroundColor Cyan
+}
 
-Write-Host "Downloading the latest Windows build from GitHub..." -ForegroundColor Cyan
-New-Item -ItemType Directory -Force -Path $Temp | Out-Null
-Invoke-WebRequest -Uri $Url -OutFile $ZipPath
+try {
+    if ($env:OS -ne 'Windows_NT') {
+        throw 'Kan Widget can only be installed on Windows 10/11.'
+    }
 
-if (Test-Path $Dest) { Remove-Item $Dest -Recurse -Force }
-New-Item -ItemType Directory -Force -Path $Dest | Out-Null
-Expand-Archive -Path $ZipPath -DestinationPath $Dest -Force
+    Write-Step 'Checking the latest published version...'
+    $ReleaseUrl = "https://api.github.com/repos/$Repo/releases/latest"
+    $Release = Invoke-RestMethod -Uri $ReleaseUrl -Headers $ApiHeaders -Method Get
 
-$Exe = Get-ChildItem $Dest -Filter 'KanWidget.exe' -Recurse | Select-Object -First 1
-if (-not $Exe) { throw 'KanWidget.exe was not found in the downloaded package.' }
+    $ZipAsset = $Release.assets | Where-Object { $_.name -eq 'KanWidget-Windows.zip' } | Select-Object -First 1
+    $HashAsset = $Release.assets | Where-Object { $_.name -eq 'SHA256SUMS.txt' } | Select-Object -First 1
 
-$ShortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Kan Widget.lnk'
-$Shell = New-Object -ComObject WScript.Shell
-$Shortcut = $Shell.CreateShortcut($ShortcutPath)
-$Shortcut.TargetPath = $Exe.FullName
-$Shortcut.WorkingDirectory = $Exe.DirectoryName
-$Shortcut.Save()
+    if (-not $ZipAsset -or -not $HashAsset) {
+        throw "The latest GitHub Release does not contain the installer files yet. Open https://github.com/$Repo/actions and run 'Build Windows app' once."
+    }
 
-Write-Host "Installed. Desktop shortcut: $ShortcutPath" -ForegroundColor Green
+    $WorkDir = Join-Path $env:TEMP ("KanWidget-" + [guid]::NewGuid().ToString('N'))
+    $ZipPath = Join-Path $WorkDir 'KanWidget-Windows.zip'
+    $HashPath = Join-Path $WorkDir 'SHA256SUMS.txt'
+    $ExtractPath = Join-Path $WorkDir 'extracted'
+    $InstallPath = Join-Path $env:LOCALAPPDATA 'Programs\KanWidget'
+
+    New-Item -ItemType Directory -Path $WorkDir -Force | Out-Null
+    Write-Step "Downloading version $($Release.tag_name)..."
+    Invoke-WebRequest -Uri $ZipAsset.browser_download_url -OutFile $ZipPath -Headers $ApiHeaders -UseBasicParsing
+    Invoke-WebRequest -Uri $HashAsset.browser_download_url -OutFile $HashPath -Headers $ApiHeaders -UseBasicParsing
+
+    $ExpectedHashLine = Get-Content -LiteralPath $HashPath | Where-Object { $_ -match 'KanWidget-Windows\.zip$' } | Select-Object -First 1
+    if (-not $ExpectedHashLine) {
+        throw 'The SHA256 checksum was not found in the release.'
+    }
+    $ExpectedHash = ($ExpectedHashLine -split '\s+')[0].ToUpperInvariant()
+    $ActualHash = (Get-FileHash -LiteralPath $ZipPath -Algorithm SHA256).Hash.ToUpperInvariant()
+    if ($ExpectedHash -ne $ActualHash) {
+        throw 'The downloaded package failed SHA256 verification. Installation was cancelled.'
+    }
+
+    Write-Step 'Verifying and extracting the package...'
+    Expand-Archive -LiteralPath $ZipPath -DestinationPath $ExtractPath -Force
+    $Exe = Get-ChildItem -LiteralPath $ExtractPath -Filter 'KanWidget.exe' -File -Recurse | Select-Object -First 1
+    if (-not $Exe) {
+        throw 'KanWidget.exe was not found in the release archive.'
+    }
+
+    $Running = Get-Process -Name 'KanWidget' -ErrorAction SilentlyContinue
+    if ($Running) {
+        throw 'Kan Widget is currently running. Close it and run the installation command again.'
+    }
+
+    if (Test-Path -LiteralPath $InstallPath) {
+        Remove-Item -LiteralPath $InstallPath -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $InstallPath -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $Exe.DirectoryName '*') -Destination $InstallPath -Recurse -Force
+
+    $InstalledExe = Join-Path $InstallPath 'KanWidget.exe'
+    if (-not (Test-Path -LiteralPath $InstalledExe)) {
+        throw 'Installation files were copied, but KanWidget.exe is missing.'
+    }
+
+    $Shell = New-Object -ComObject WScript.Shell
+    $DesktopShortcut = $Shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'Kan Widget.lnk'))
+    $DesktopShortcut.TargetPath = $InstalledExe
+    $DesktopShortcut.WorkingDirectory = $InstallPath
+    $DesktopShortcut.IconLocation = "$InstalledExe,0"
+    $DesktopShortcut.Save()
+
+    $StartMenuDir = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Kan Widget'
+    New-Item -ItemType Directory -Path $StartMenuDir -Force | Out-Null
+    $StartShortcut = $Shell.CreateShortcut((Join-Path $StartMenuDir 'Kan Widget.lnk'))
+    $StartShortcut.TargetPath = $InstalledExe
+    $StartShortcut.WorkingDirectory = $InstallPath
+    $StartShortcut.IconLocation = "$InstalledExe,0"
+    $StartShortcut.Save()
+
+    Write-Step "Kan Widget $($Release.tag_name) was installed successfully."
+    Write-Step 'Launching Kan Widget...'
+    Start-Process -FilePath $InstalledExe -WorkingDirectory $InstallPath
+}
+catch {
+    Write-Host "[Kan Widget] Installation failed: $($_.Exception.Message)" -ForegroundColor Red
+    throw
+}
+finally {
+    if ($WorkDir -and (Test-Path -LiteralPath $WorkDir)) {
+        Remove-Item -LiteralPath $WorkDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
