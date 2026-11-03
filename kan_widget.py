@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "Kan Widget"
-APP_VERSION = "0.1.1"
+APP_VERSION = "0.2.0"
 APP_DIR = Path(os.getenv("APPDATA", str(Path.home()))) / "KanWidget"
 SETTINGS_FILE = APP_DIR / "settings.json"
 VPN_CONFIG_FILE = APP_DIR / "sing-box.json"
