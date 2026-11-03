@@ -377,7 +377,7 @@ class KanWindow(QMainWindow):
         version = QLabel("KAN WIDGET  •  v0.1.0")
         version.setObjectName("mutedSmall")
         side.addWidget(version)
-        main.addWidget(side)
+        main.addWidget(sidebar)
 
         content = QWidget()
         content_layout = QVBoxLayout(content)
