@@ -1420,6 +1420,7 @@ class KanWindow(QMainWindow):
         self.operation_busy = True
         self._set_vpn_controls_enabled(False)
         self.connect_button.setEnabled(False)
+        self._refresh_dashboard_vpn()
         thread = QThread(self)
         worker = Worker(fn)
         worker.moveToThread(thread)
@@ -1447,7 +1448,7 @@ class KanWindow(QMainWindow):
         callback = self.active_done_callback
         self.active_done_callback = None
         self.operation_busy = False
-        self.update_sub_button.setEnabled(True)
+        self.update_sub_button.setText("⟳  بروزرسانی")
         if self.engine_process is None or self.engine_process.poll() is not None:
             self.connect_button.setEnabled(True)
             self.connect_button.setText("اتصال")
@@ -1456,18 +1457,22 @@ class KanWindow(QMainWindow):
             self._set_vpn_controls_enabled(False)
         if callback:
             callback(result)
+        self._refresh_dashboard_vpn()
 
     def _worker_failed(self, message: str):
         self.active_done_callback = None
         self.operation_busy = False
         self.update_sub_button.setEnabled(True)
         self.update_sub_button.setText("⟳  بروزرسانی")
+        if hasattr(self, "dashboard_update_button"):
+            self.dashboard_update_button.setText("⟳  بروزرسانی")
         if self.engine_process is None or self.engine_process.poll() is not None:
             self.connect_button.setEnabled(True)
             self.connect_button.setText("اتصال")
             self._set_vpn_controls_enabled(True)
         else:
             self._set_vpn_controls_enabled(False)
+        self._refresh_dashboard_vpn()
         QMessageBox.warning(self, "عملیات ناموفق", message)
 
     def update_subscription(self):
@@ -1485,6 +1490,8 @@ class KanWindow(QMainWindow):
 
         if self._run_worker(fetch, self._subscription_loaded):
             self.update_sub_button.setText("در حال دریافت...")
+            if hasattr(self, "dashboard_update_button"):
+                self.dashboard_update_button.setText("در حال دریافت...")
 
     def _subscription_loaded(self, result):
         url, nodes = result
@@ -1496,6 +1503,10 @@ class KanWindow(QMainWindow):
         self.settings["selected_node"] = selected
         save_settings(self.settings)
         self._load_nodes()
+        self._refresh_dashboard_vpn()
+        if hasattr(self, "dashboard_update_button"):
+            self.dashboard_update_button.setText("⟳  بروزرسانی")
+        self.update_sub_button.setText("⟳  بروزرسانی")
         QMessageBox.information(self, "اشتراک بروزرسانی شد", f"{len(nodes)} سرور با موفقیت دریافت شد.")
 
     def add_single_link(self):
@@ -1715,6 +1726,7 @@ class KanWindow(QMainWindow):
             self.connection_badge.setText("●  VPN فعال است")
             self.connection_badge.setStyleSheet("color:#5CE0BE;")
             self._set_vpn_controls_enabled(False)
+            self._refresh_dashboard_vpn()
         except Exception as exc:
             restored = self._restore_windows_proxy()
             if restored:
@@ -1828,6 +1840,7 @@ class KanWindow(QMainWindow):
         self.vpn_detail.setText("اتصال قطع شد و تنظیمات پراکسی قبلی ویندوز بازیابی شد.")
         self.connection_badge.setText("●  VPN قطع است")
         self.connection_badge.setStyleSheet("")
+        self._refresh_dashboard_vpn()
 
     def _recover_stale_proxy(self):
         # A previous process may have exited before it could restore Windows proxy settings.
