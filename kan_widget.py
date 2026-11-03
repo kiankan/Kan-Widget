@@ -314,6 +314,31 @@ def parse_subscription(content: str) -> list[dict[str, Any]]:
     return nodes
 
 
+def fetch_subscription_text(url: str, max_bytes: int = 8 * 1024 * 1024) -> str:
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise ValueError("آدرس اشتراک باید با http:// یا https:// شروع شود")
+    if parsed.username or parsed.password:
+        raise ValueError("نام کاربری و رمز را داخل آدرس اشتراک قرار نده")
+
+    chunks: list[bytes] = []
+    total = 0
+    headers = {"User-Agent": f"KanWidget/{APP_VERSION}"}
+    with requests.get(url, stream=True, timeout=(10, 30), headers=headers) as response:
+        response.raise_for_status()
+        declared_size = response.headers.get("Content-Length")
+        if declared_size and declared_size.isdigit() and int(declared_size) > max_bytes:
+            raise ValueError("حجم فایل اشتراک بیش از ۸ مگابایت است")
+        for chunk in response.iter_content(chunk_size=64 * 1024):
+            if not chunk:
+                continue
+            total += len(chunk)
+            if total > max_bytes:
+                raise ValueError("حجم فایل اشتراک بیش از ۸ مگابایت است")
+            chunks.append(chunk)
+    return b"".join(chunks).decode("utf-8-sig", errors="replace")
+
+
 def format_bytes(value: float) -> str:
     units = ["B/s", "KB/s", "MB/s", "GB/s"]
     n = max(0.0, float(value))
@@ -957,14 +982,17 @@ class KanWindow(QMainWindow):
             save_settings(self.settings)
 
     def _run_worker(self, fn, on_done):
-        if self.active_thread and self.active_thread.isRunning():
+        if self.operation_busy or (self.active_thread and self.active_thread.isRunning()):
             QMessageBox.information(self, "در حال انجام", "یک عملیات دیگر هنوز در حال اجراست.")
-            return
+            return False
+        self.operation_busy = True
+        self.update_sub_button.setEnabled(False)
+        self.connect_button.setEnabled(False)
         thread = QThread(self)
         worker = Worker(fn)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
-        worker.done.connect(on_done)
+        worker.done.connect(lambda result: self._worker_succeeded(on_done, result))
         worker.failed.connect(self._worker_failed)
         worker.done.connect(thread.quit)
         worker.failed.connect(thread.quit)
@@ -972,12 +1000,23 @@ class KanWindow(QMainWindow):
         thread.finished.connect(thread.deleteLater)
         self.active_thread, self.active_worker = thread, worker
         thread.start()
+        return True
+
+    def _worker_succeeded(self, callback, result):
+        self.operation_busy = False
+        self.update_sub_button.setEnabled(True)
+        if self.engine_process is None or self.engine_process.poll() is not None:
+            self.connect_button.setEnabled(True)
+            self.connect_button.setText("اتصال")
+        callback(result)
 
     def _worker_failed(self, message: str):
+        self.operation_busy = False
         self.update_sub_button.setEnabled(True)
         self.update_sub_button.setText("⟳  بروزرسانی")
-        self.connect_button.setEnabled(True)
-        self.connect_button.setText("اتصال")
+        if self.engine_process is None or self.engine_process.poll() is not None:
+            self.connect_button.setEnabled(True)
+            self.connect_button.setText("اتصال")
         QMessageBox.warning(self, "عملیات ناموفق", message)
 
     def update_subscription(self):
@@ -985,29 +1024,26 @@ class KanWindow(QMainWindow):
         if not url:
             QMessageBox.information(self, "آدرس اشتراک", "ابتدا آدرس اشتراک را وارد کن.")
             return
-        self.update_sub_button.setEnabled(False)
-        self.update_sub_button.setText("در حال دریافت...")
 
         def fetch():
-            response = requests.get(url, timeout=25, headers={"User-Agent": "KanWidget/0.1"})
-            response.raise_for_status()
-            nodes = parse_subscription(response.text)
+            content = fetch_subscription_text(url)
+            nodes = parse_subscription(content)
             if not nodes:
-                raise ValueError("هیچ لینک سازگاری پیدا نشد. فرمت اشتراک باید شامل لینک‌های VLESS، VMess، Trojan یا SS باشد.")
+                raise ValueError("هیچ لینک سازگاری پیدا نشد. اشتراک باید شامل لینک‌های VLESS، VMess، Trojan یا SS باشد.")
             return (url, nodes)
 
-        self._run_worker(fetch, self._subscription_loaded)
+        if self._run_worker(fetch, self._subscription_loaded):
+            self.update_sub_button.setText("در حال دریافت...")
 
     def _subscription_loaded(self, result):
         url, nodes = result
+        previous_selection = self.settings.get("selected_node", "")
         self.settings["subscription_url"] = url
         self.subscription_input.setText(url)
         self.settings["nodes"] = nodes
-        if nodes:
-            self.settings["selected_node"] = nodes[0]["name"]
+        selected = next((node["name"] for node in nodes if node["name"] == previous_selection), nodes[0]["name"])
+        self.settings["selected_node"] = selected
         save_settings(self.settings)
-        self.update_sub_button.setEnabled(True)
-        self.update_sub_button.setText("⟳  بروزرسانی")
         self._load_nodes()
         QMessageBox.information(self, "اشتراک بروزرسانی شد", f"{len(nodes)} سرور با موفقیت دریافت شد.")
 
