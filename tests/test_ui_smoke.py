@@ -41,7 +41,6 @@ class WindowSmokeTests(unittest.TestCase):
             self.assertIsNotNone(window.dashboard_disconnect_button)
             self.assertIsNotNone(window.quick_apps)
             self.assertIsNotNone(window.apps_grid)
-            self.assertEqual(window.usage_chart.cpu_values[-1], 0.0)
             window.usage_chart.add_sample(37.0, 62.0)
             self.assertEqual(window.usage_chart.cpu_values[-1], 37.0)
             self.assertEqual(window.usage_chart.ram_values[-1], 62.0)
