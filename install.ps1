@@ -64,7 +64,7 @@ try {
         Remove-Item -LiteralPath $InstallPath -Recurse -Force
     }
     New-Item -ItemType Directory -Path $InstallPath -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $Exe.DirectoryName '*') -Destination $InstallPath -Recurse -Force
+    Copy-Item -Path (Join-Path $Exe.DirectoryName '*') -Destination $InstallPath -Recurse -Force
 
     $InstalledExe = Join-Path $InstallPath 'KanWidget.exe'
     if (-not (Test-Path -LiteralPath $InstalledExe)) {
