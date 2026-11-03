@@ -36,19 +36,17 @@ py -3 kan_widget.py
 
 فایل `build_windows.bat` را اجرا کن. خروجی در مسیر `dist\KanWidget\KanWidget.exe` قرار می‌گیرد.
 
-## انتشار و نصب از GitHub
+## نصب با یک دستور PowerShell
 
-1. کدها در همین مخزن قرار گرفته‌اند.
-2. در GitHub وارد بخش **Actions** شو و Workflow با نام **Build Windows app** را اجرا کن، یا یک tag با نامی مثل `v0.1.0` منتشر کن.
-3. با انتشار tag، GitHub Actions فایل `KanWidget-Windows.zip` را در بخش Releases می‌سازد.
-4. برای نصب روی ویندوز، PowerShell را در پوشه پروژه باز کن و اجرا کن:
+بعد از انتشار اولین نسخه ویندوز در GitHub Releases، PowerShell را باز کن و این دستور را اجرا کن:
 
 ```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\install.ps1
+irm https://raw.githubusercontent.com/kiankan/Kan-Widget/main/install.ps1 | iex
 ```
 
-اسکریپت نام مخزن GitHub را می‌پرسد، آخرین نسخه Release را دانلود می‌کند و میانبر دسکتاپ می‌سازد.
+این دستور آخرین Release را دریافت می‌کند، فایل نصب را با SHA256 بررسی می‌کند، برنامه را در پوشه کاربر نصب می‌کند، میانبر دسکتاپ و Start Menu می‌سازد و برنامه را اجرا می‌کند. دسترسی Administrator لازم نیست.
+
+برای انتشار اولین نسخه، در GitHub به **Actions → Build Windows app → Run workflow** برو و تگ `v0.1.0` را منتشر کن. بعد از پایان موفق Workflow، دستور بالا قابل استفاده خواهد بود.
 
 ## هسته VPN
 
