@@ -1429,6 +1429,13 @@ class KanWindow(QMainWindow):
             self.dashboard_connect_button.setText("متصل")
             self.dashboard_connect_button.setEnabled(False)
             self.dashboard_disconnect_button.setEnabled(True)
+        elif self.operation_busy:
+            self.dashboard_vpn_status.setText("●  در حال انجام عملیات")
+            self.dashboard_vpn_status.setStyleSheet("color:#70B9EF; font-weight:700;")
+            self.dashboard_vpn_detail.setText("در حال آماده‌سازی اتصال یا به‌روزرسانی اشتراک...")
+            self.dashboard_connect_button.setText("در حال پردازش...")
+            self.dashboard_connect_button.setEnabled(False)
+            self.dashboard_disconnect_button.setEnabled(False)
         else:
             self.dashboard_vpn_status.setText("●  اتصال برقرار نیست")
             self.dashboard_vpn_status.setStyleSheet("")
