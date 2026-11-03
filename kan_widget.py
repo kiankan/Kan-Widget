@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import atexit
 import base64
+import hashlib
 import json
 import os
 import platform
@@ -11,12 +12,10 @@ import socket
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import urllib.parse
 import zipfile
-from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import psutil
@@ -30,11 +29,13 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "Kan Widget"
+APP_VERSION = "0.1.1"
 APP_DIR = Path(os.getenv("APPDATA", str(Path.home()))) / "KanWidget"
 SETTINGS_FILE = APP_DIR / "settings.json"
 VPN_CONFIG_FILE = APP_DIR / "sing-box.json"
 PROXY_SNAPSHOT_FILE = APP_DIR / "proxy_snapshot.json"
 ENGINE_DIR = APP_DIR / "engine"
+ENGINE_LOG_FILE = ENGINE_DIR / "sing-box.log"
 MIXED_PORT = 20808
 GITHUB_API = "https://api.github.com/repos/SagerNet/sing-box/releases/latest"
 
@@ -53,19 +54,40 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 
 def load_settings() -> dict[str, Any]:
     APP_DIR.mkdir(parents=True, exist_ok=True)
+    data: dict[str, Any] = {}
     if SETTINGS_FILE.exists():
         try:
-            data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-            return {**DEFAULT_SETTINGS, **data}
-        except Exception:
-            pass
-    save_settings(DEFAULT_SETTINGS)
-    return dict(DEFAULT_SETTINGS)
+            loaded = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                data = loaded
+        except (OSError, json.JSONDecodeError):
+            # Keep a recoverable copy instead of silently overwriting damaged data.
+            try:
+                backup = SETTINGS_FILE.with_suffix(".corrupt.json")
+                if not backup.exists():
+                    shutil.copy2(SETTINGS_FILE, backup)
+            except OSError:
+                pass
+    settings = {**DEFAULT_SETTINGS, **data}
+    for key in ("apps", "nodes", "tasks"):
+        if not isinstance(settings.get(key), list):
+            settings[key] = []
+    for key in ("subscription_url", "selected_node", "notes"):
+        if not isinstance(settings.get(key), str):
+            settings[key] = ""
+    if settings.get("theme") not in ("dark", "light"):
+        settings["theme"] = "dark"
+    if not isinstance(settings.get("always_on_top"), bool):
+        settings["always_on_top"] = False
+    return settings
 
 
 def save_settings(settings: dict[str, Any]) -> None:
     APP_DIR.mkdir(parents=True, exist_ok=True)
-    SETTINGS_FILE.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_path = SETTINGS_FILE.with_suffix(".tmp")
+    payload = json.dumps(settings, ensure_ascii=False, indent=2)
+    temp_path.write_text(payload, encoding="utf-8")
+    os.replace(temp_path, SETTINGS_FILE)
 
 
 def decode_subscription(raw: str) -> str:
@@ -121,11 +143,11 @@ def transport_from_query(q: dict[str, list[str]]) -> dict[str, Any] | None:
         path = query_first(q, "path")
         host = query_first(q, "host")
         if path:
-            result["path"] = urllib.parse.unquote(path)
+            result["path"] = path
         if host:
             result["host"] = host
         return result
-    return None
+    raise ValueError(f"انتقال شبکه {net} هنوز پشتیبانی نمی‌شود")
 
 
 def tls_from_query(q: dict[str, list[str]], server: str) -> dict[str, Any] | None:
@@ -141,15 +163,20 @@ def tls_from_query(q: dict[str, list[str]], server: str) -> dict[str, Any] | Non
     fp = query_first(q, "fp", "fingerprint")
     if fp:
         tls["utls"] = {"enabled": True, "fingerprint": fp}
+    alpn = query_first(q, "alpn")
+    if alpn:
+        tls["alpn"] = [item.strip() for item in alpn.split(",") if item.strip()]
     if security == "reality":
         public_key = query_first(q, "pbk", "publicKey")
         short_id = query_first(q, "sid", "shortId")
         if not public_key:
             raise ValueError("پارامتر public key (pbk) برای Reality پیدا نشد")
-        reality: dict[str, Any] = {"enabled": True, "public_key": public_key}
-        if short_id:
-            reality["short_id"] = short_id
-        tls["reality"] = reality
+        # sing-box expects short_id even when the server uses an empty short ID.
+        tls["reality"] = {
+            "enabled": True,
+            "public_key": public_key,
+            "short_id": short_id,
+        }
     return tls
 
 
@@ -179,7 +206,9 @@ def parse_vmess(uri: str) -> dict[str, Any]:
             transport["headers"] = {"Host": host}
         outbound["transport"] = transport
     elif net == "grpc":
-        outbound["transport"] = {"type": "grpc", "service_name": str(obj.get("path", "" )).strip("/")}
+        outbound["transport"] = {"type": "grpc", "service_name": str(obj.get("path", "")).strip("/")}
+    elif net not in ("tcp", "none", ""):
+        raise ValueError(f"انتقال VMess با نوع {net} هنوز پشتیبانی نمی‌شود")
     if str(obj.get("tls", "")).lower() in ("tls", "true", "1"):
         tls = {"enabled": True, "server_name": str(obj.get("sni") or obj.get("host") or server)}
         if obj.get("allowInsecure") in ("1", 1, True, "true"):
@@ -207,8 +236,11 @@ def parse_uri(uri: str) -> dict[str, Any]:
         netloc = parsed.netloc.rsplit("@", 1)
         if len(netloc) == 2:
             userinfo, hostport = netloc
+            userinfo = urllib.parse.unquote(userinfo)
             if ":" not in userinfo:
                 userinfo = b64_text(userinfo)
+            if ":" not in userinfo:
+                raise ValueError("اطلاعات احراز هویت Shadowsocks نامعتبر است")
             method, password = userinfo.split(":", 1)
             host_parsed = urllib.parse.urlsplit("//" + hostport)
             server, port = host_parsed.hostname, host_parsed.port
@@ -217,14 +249,26 @@ def parse_uri(uri: str) -> dict[str, Any]:
             host_parsed = urllib.parse.urlsplit("//" + decoded.split("@", 1)[1])
             method, password = decoded.split("@", 1)[0].split(":", 1)
             server, port = host_parsed.hostname, host_parsed.port
-        if not server or not port:
+        if not server or not port or not (1 <= int(port) <= 65535):
             raise ValueError("آدرس Shadowsocks نامعتبر است")
-        return {"name": name, "outbound": {"type": "shadowsocks", "tag": name,
-                "server": server, "server_port": int(port), "method": method, "password": password}}
+        outbound = {
+            "type": "shadowsocks", "tag": name,
+            "server": server, "server_port": int(port),
+            "method": method, "password": password,
+        }
+        plugin = query_first(q, "plugin")
+        if plugin:
+            plugin_name, separator, plugin_opts = plugin.partition(";")
+            if plugin_name not in ("obfs-local", "v2ray-plugin"):
+                raise ValueError(f"افزونه Shadowsocks با نام {plugin_name} پشتیبانی نمی‌شود")
+            outbound["plugin"] = plugin_name
+            if separator and plugin_opts:
+                outbound["plugin_opts"] = plugin_opts
+        return {"name": name, "outbound": outbound}
 
     server = parsed.hostname
     port = parsed.port
-    if not server or not port:
+    if not server or not port or not (1 <= int(port) <= 65535):
         raise ValueError("آدرس سرور یا پورت نامعتبر است")
     outbound: dict[str, Any] = {"type": scheme, "tag": name, "server": server, "server_port": int(port)}
     if scheme == "vless":
@@ -259,7 +303,9 @@ def parse_subscription(content: str) -> list[dict[str, Any]]:
             continue
         try:
             node = parse_uri(line)
-            signature = json.dumps(node["outbound"], sort_keys=True, ensure_ascii=False)
+            outbound_signature = dict(node["outbound"])
+            outbound_signature.pop("tag", None)
+            signature = json.dumps(outbound_signature, sort_keys=True, ensure_ascii=False)
             if signature not in seen:
                 seen.add(signature)
                 nodes.append(node)
@@ -297,6 +343,7 @@ class Worker(QObject):
 class MetricCard(QFrame):
     def __init__(self, title: str, icon: str, value: str = "--", subtitle: str = ""):
         super().__init__()
+        self.setObjectName("metricCard")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 16, 18, 16)
         top = QHBoxLayout()
@@ -324,6 +371,8 @@ class KanWindow(QMainWindow):
         self.engine_process: subprocess.Popen | None = None
         self.active_thread: QThread | None = None
         self.active_worker: Worker | None = None
+        self.operation_busy = False
+        self.gpu_name_cache: str | None = None
         self.last_net = psutil.net_io_counters()
         self.last_net_time = time.time()
         self.current_theme = self.settings.get("theme", "dark")
@@ -374,7 +423,7 @@ class KanWindow(QMainWindow):
         self.connection_badge = QLabel("●  VPN قطع است")
         self.connection_badge.setObjectName("connectionBadge")
         side.addWidget(self.connection_badge)
-        version = QLabel("KAN WIDGET  •  v0.1.0")
+        version = QLabel(f"KAN WIDGET  •  v{APP_VERSION}")
         version.setObjectName("mutedSmall")
         side.addWidget(version)
         main.addWidget(sidebar)
@@ -395,7 +444,11 @@ class KanWindow(QMainWindow):
         content_layout.addLayout(header)
 
         self.pages = QStackedWidget()
-        self.pages.addWidget(self._dashboard_page())
+        dashboard_scroll = QScrollArea()
+        dashboard_scroll.setWidgetResizable(True)
+        dashboard_scroll.setFrameShape(QFrame.NoFrame)
+        dashboard_scroll.setWidget(self._dashboard_page())
+        self.pages.addWidget(dashboard_scroll)
         self.pages.addWidget(self._vpn_page())
         self.pages.addWidget(self._apps_page())
         self.pages.addWidget(self._settings_page())
@@ -745,7 +798,9 @@ class KanWindow(QMainWindow):
         self.net_card.set_values(format_bytes(down), f"↑ {format_bytes(up)} ارسال")
         self.last_net, self.last_net_time = current, t
         self.uptime_card.set_values(self._uptime_text(), "از آخرین روشن‌شدن سیستم")
-        gpu = self._gpu_name()
+        if self.gpu_name_cache is None:
+            self.gpu_name_cache = self._gpu_name()
+        gpu = self.gpu_name_cache
         self.gpu_card.set_values(gpu, "NVIDIA / nvidia-smi" if gpu != "در دسترس نیست" else "درایور یا ابزار NVIDIA پیدا نشد")
 
     def _uptime_text(self) -> str:
