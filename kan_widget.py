@@ -397,6 +397,7 @@ class KanWindow(QMainWindow):
         self.active_thread: QThread | None = None
         self.active_worker: Worker | None = None
         self.operation_busy = False
+        self.active_done_callback = None
         self.gpu_name_cache: str | None = None
         self.last_net = psutil.net_io_counters()
         self.last_net_time = time.time()
@@ -992,7 +993,8 @@ class KanWindow(QMainWindow):
         worker = Worker(fn)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
-        worker.done.connect(lambda result: self._worker_succeeded(on_done, result))
+        self.active_done_callback = on_done
+        worker.done.connect(self._worker_succeeded)
         worker.failed.connect(self._worker_failed)
         worker.done.connect(thread.quit)
         worker.failed.connect(thread.quit)
@@ -1002,15 +1004,19 @@ class KanWindow(QMainWindow):
         thread.start()
         return True
 
-    def _worker_succeeded(self, callback, result):
+    def _worker_succeeded(self, result):
+        callback = self.active_done_callback
+        self.active_done_callback = None
         self.operation_busy = False
         self.update_sub_button.setEnabled(True)
         if self.engine_process is None or self.engine_process.poll() is not None:
             self.connect_button.setEnabled(True)
             self.connect_button.setText("اتصال")
-        callback(result)
+        if callback:
+            callback(result)
 
     def _worker_failed(self, message: str):
+        self.active_done_callback = None
         self.operation_busy = False
         self.update_sub_button.setEnabled(True)
         self.update_sub_button.setText("⟳  بروزرسانی")
@@ -1293,7 +1299,9 @@ class KanWindow(QMainWindow):
             except FileNotFoundError:
                 server = ""
         snapshot = {"enabled": int(enabled), "server": str(server)}
-        PROXY_SNAPSHOT_FILE.write_text(json.dumps(snapshot), encoding="utf-8")
+        snapshot_tmp = PROXY_SNAPSHOT_FILE.with_suffix(".tmp")
+        snapshot_tmp.write_text(json.dumps(snapshot), encoding="utf-8")
+        os.replace(snapshot_tmp, PROXY_SNAPSHOT_FILE)
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE) as key:
             winreg.SetValueEx(key, "ProxyEnable", 0, winreg.REG_DWORD, 1)
             winreg.SetValueEx(key, "ProxyServer", 0, winreg.REG_SZ, f"http=127.0.0.1:{MIXED_PORT};https=127.0.0.1:{MIXED_PORT};socks=127.0.0.1:{MIXED_PORT}")
@@ -1301,19 +1309,19 @@ class KanWindow(QMainWindow):
         self.settings["proxy_snapshot"] = snapshot
         save_settings(self.settings)
 
-    def _restore_windows_proxy(self):
+    def _restore_windows_proxy(self) -> bool:
         if os.name != "nt":
-            return
+            return True
         snapshot = None
         if PROXY_SNAPSHOT_FILE.exists():
             try:
                 snapshot = json.loads(PROXY_SNAPSHOT_FILE.read_text(encoding="utf-8"))
-            except Exception:
-                snapshot = None
-        if not snapshot:
+            except (OSError, json.JSONDecodeError):
+                return False
+        else:
             snapshot = self.settings.get("proxy_snapshot")
         if not snapshot:
-            return
+            return True
         try:
             import winreg
             key_path = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
@@ -1327,11 +1335,13 @@ class KanWindow(QMainWindow):
                     except FileNotFoundError:
                         pass
         except Exception:
-            pass
+            # Keep the backup file so restoration can be retried.
+            return False
         self._notify_windows_proxy_change()
         PROXY_SNAPSHOT_FILE.unlink(missing_ok=True)
         self.settings["proxy_snapshot"] = None
         save_settings(self.settings)
+        return True
 
     def _notify_windows_proxy_change(self):
         if os.name != "nt":
@@ -1354,7 +1364,12 @@ class KanWindow(QMainWindow):
         self.engine_process = None
 
     def disconnect_vpn(self):
-        self._restore_windows_proxy()
+        if not self._restore_windows_proxy():
+            QMessageBox.critical(
+                self, "بازیابی پراکسی ناموفق",
+                "تنظیمات قبلی پراکسی ویندوز بازیابی نشد. اتصال را فعال نگه داشتم تا اینترنتت قطع نشود؛ دوباره تلاش کن.",
+            )
+            return
         self._stop_engine()
         self.connect_button.setEnabled(True)
         self.connect_button.setText("اتصال")
@@ -1370,7 +1385,7 @@ class KanWindow(QMainWindow):
             self._restore_proxy_without_ui()
 
     def _restore_proxy_without_ui(self):
-        if os.name != "nt":
+        if os.name != "nt" or not PROXY_SNAPSHOT_FILE.exists():
             return
         try:
             snapshot = json.loads(PROXY_SNAPSHOT_FILE.read_text(encoding="utf-8"))
@@ -1388,22 +1403,37 @@ class KanWindow(QMainWindow):
             self._notify_windows_proxy_change()
             PROXY_SNAPSHOT_FILE.unlink(missing_ok=True)
         except Exception:
+            # Leave the snapshot in place so the next launch can retry.
             pass
 
     def _shutdown_cleanup(self):
         try:
-            self._restore_windows_proxy()
-            self._stop_engine()
+            if self._restore_windows_proxy():
+                self._stop_engine()
         except Exception:
             pass
 
     def closeEvent(self, event):
+        if self.operation_busy:
+            QMessageBox.information(
+                self, "عملیات در حال اجرا",
+                "تا پایان دریافت اشتراک یا آماده‌سازی اتصال، برنامه را نبند.",
+            )
+            event.ignore()
+            return
         if self.engine_process and self.engine_process.poll() is None:
             answer = QMessageBox.question(self, "خروج از Kan Widget", "VPN متصل است. هنگام خروج اتصال قطع شود؟")
-            if answer == QMessageBox.No:
+            if answer != QMessageBox.Yes:
                 event.ignore()
                 return
-        self._shutdown_cleanup()
+        if not self._restore_windows_proxy():
+            QMessageBox.critical(
+                self, "بازیابی پراکسی ناموفق",
+                "تنظیمات قبلی پراکسی ویندوز بازیابی نشد. برنامه باز می‌ماند تا بتوانی دوباره قطع اتصال را امتحان کنی.",
+            )
+            event.ignore()
+            return
+        self._stop_engine()
         event.accept()
 
 
