@@ -983,38 +983,134 @@ class KanWindow(QMainWindow):
 
     def _apply_theme(self):
         if self.current_theme == "light":
-            bg, panel, sidebar, text, muted = "#F3F6FA", "#FFFFFF", "#E9EEF5", "#172033", "#738096"
-            border = "#E1E7EF"
+            bg, panel, sidebar = "#EEF3FA", "#FFFFFF", "#E5ECF6"
+            text, muted, border = "#172338", "#718096", "#D9E3EF"
+            hero_start, hero_end = "#D9E9FA", "#D9F3F0"
         else:
-            bg, panel, sidebar, text, muted = "#0D1220", "#151D2E", "#101827", "#EDF3FC", "#91A0B7"
-            border = "#263247"
+            bg, panel, sidebar = "#0A111C", "#121D2B", "#0D1724"
+            text, muted, border = "#EDF4FC", "#91A2B8", "#26384B"
+            hero_start, hero_end = "#152A42", "#123A43"
+
         self.setStyleSheet(f"""
-            QMainWindow, QWidget {{ background: {bg}; color: {text}; font-family: 'Segoe UI', 'Tahoma'; font-size: 10pt; }}
-            #sidebar {{ background: {sidebar}; border-right: 1px solid {border}; }}
+            QMainWindow, QWidget {{
+                background: {bg};
+                color: {text};
+                font-family: 'Segoe UI', 'Tahoma';
+                font-size: 10pt;
+            }}
+            #sidebar {{
+                background: {sidebar};
+                border-right: 1px solid {border};
+            }}
             #brand {{ font-size: 25pt; font-weight: 900; letter-spacing: 2px; }}
             #pageTitle {{ font-size: 21pt; font-weight: 800; }}
-            #hero {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #192B42, stop:1 #183B48); border: 1px solid #285366; border-radius: 18px; }}
-            #heroTitle {{ color: #FFFFFF; font-size: 19pt; font-weight: 800; }}
-            #heroSub {{ color: #B7CAD9; font-size: 10pt; }}
-            #clock {{ color: #6FE5D1; font-size: 31pt; font-weight: 800; }}
-            QTextEdit {{ background: {bg}; border: 1px solid {border}; border-radius: 8px; padding: 7px; color: {text}; }}
-            #metricCard, #panel, #connectPanel {{ background: {panel}; border: 1px solid {border}; border-radius: 15px; }}
-            #metricValue {{ font-size: 23pt; font-weight: 800; }}
+            #hero {{
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 {hero_start}, stop:1 {hero_end});
+                border: 1px solid #2A5967;
+                border-radius: 18px;
+            }}
+            #heroTitle {{ color: {text}; font-size: 18pt; font-weight: 800; }}
+            #heroSub {{ color: {muted}; font-size: 9pt; }}
+            #clock {{ color: #42D9C3; font-size: 30pt; font-weight: 850; }}
+            #heroMini {{
+                background: rgba(12, 26, 39, 0.12);
+                border: 1px solid {border};
+                border-radius: 13px;
+                min-width: 190px;
+            }}
+            #storageValue {{ font-size: 14pt; font-weight: 800; }}
+            QProgressBar#storageProgress {{
+                background: {border};
+                border: none;
+                border-radius: 4px;
+            }}
+            QProgressBar#storageProgress::chunk {{
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #32CBB7, stop:1 #70A9F5);
+                border-radius: 4px;
+            }}
+            #proCard, #panel, #connectPanel, #metricCard {{
+                background: {panel};
+                border: 1px solid {border};
+                border-radius: 15px;
+            }}
+            #vpnWidget {{
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #122838, stop:1 #142D34);
+                border: 1px solid #285A61;
+                border-radius: 16px;
+            }}
+            #metricValue {{ font-size: 21pt; font-weight: 800; }}
             #muted, #mutedSmall {{ color: {muted}; }}
             #mutedSmall {{ font-size: 8.5pt; }}
-            #sectionTitle {{ font-size: 14pt; font-weight: 750; }}
+            #sectionTitle {{ font-size: 13pt; font-weight: 750; }}
             #fieldLabel {{ font-weight: 700; }}
-            QPushButton {{ border: 1px solid {border}; border-radius: 10px; padding: 10px 14px; background: {panel}; color: {text}; }}
+            #liveBadge {{
+                color: #43D9B8;
+                background: rgba(67, 217, 184, 0.10);
+                border: 1px solid rgba(67, 217, 184, 0.25);
+                border-radius: 8px;
+                padding: 4px 8px;
+                font-size: 8pt;
+                font-weight: 800;
+            }}
+            #cpuLegend {{ color: #40D8C3; font-size: 9pt; font-weight: 700; }}
+            #ramLegend {{ color: #A78BFA; font-size: 9pt; font-weight: 700; }}
+            #vpnStatus {{ color: #F0B55A; font-size: 10pt; font-weight: 700; }}
+            QPushButton {{
+                border: 1px solid {border};
+                border-radius: 10px;
+                padding: 9px 13px;
+                background: {panel};
+                color: {text};
+            }}
             QPushButton:hover {{ border-color: #48D9C2; }}
-            QPushButton:checked, #navButton:checked {{ background: #1B3D4A; border-color: #286A70; color: #73E7D4; }}
-            #navButton {{ text-align: left; border: none; background: transparent; padding: 13px 12px; font-size: 10.5pt; }}
-            #primaryButton {{ background: #36CDB5; color: #071A1B; border: none; font-weight: 800; }}
+            QPushButton:checked, #navButton:checked {{
+                background: #163B49;
+                border-color: #286A70;
+                color: #73E7D4;
+            }}
+            QPushButton:disabled {{ color: {muted}; background: {bg}; }}
+            #navButton {{
+                text-align: left;
+                border: none;
+                background: transparent;
+                padding: 13px 12px;
+                font-size: 10.5pt;
+            }}
+            #primaryButton {{
+                background: #36CDB5;
+                color: #071A1B;
+                border: none;
+                font-weight: 800;
+            }}
             #primaryButton:hover {{ background: #61E0CB; }}
-            #dangerButton {{ background: #4A2634; color: #FFB9C6; border-color: #6A3547; font-weight: 700; }}
+            #dangerButton {{
+                background: #4A2634;
+                color: #FFB9C6;
+                border-color: #6A3547;
+                font-weight: 700;
+            }}
             #ghostButton, #smallButton {{ background: transparent; }}
-            #connectionBadge {{ background: {panel}; border: 1px solid {border}; border-radius: 10px; padding: 9px; color: {muted}; }}
-            QLineEdit, QComboBox {{ background: {bg}; border: 1px solid {border}; border-radius: 9px; padding: 11px; color: {text}; selection-background-color: #2A8F83; }}
-            QComboBox QAbstractItemView {{ background: {panel}; color: {text}; selection-background-color: #285B62; }}
+            #connectionBadge {{
+                background: {panel};
+                border: 1px solid {border};
+                border-radius: 10px;
+                padding: 9px;
+                color: {muted};
+            }}
+            QTextEdit, QLineEdit, QComboBox {{
+                background: {bg};
+                border: 1px solid {border};
+                border-radius: 9px;
+                padding: 10px;
+                color: {text};
+                selection-background-color: #2A8F83;
+            }}
+            QComboBox QAbstractItemView {{
+                background: {panel};
+                color: {text};
+                selection-background-color: #285B62;
+            }}
+            QCheckBox {{ spacing: 8px; }}
             QScrollArea {{ border: none; background: transparent; }}
         """)
 
@@ -1045,12 +1141,15 @@ class KanWindow(QMainWindow):
                 self.vpn_detail.setText("هسته VPN متوقف شد و پراکسی قبلی ویندوز بازیابی شد.")
                 self.connection_badge.setText("●  VPN قطع است")
                 self.connection_badge.setStyleSheet("")
+                self.proxy_recovery_pending = False
                 self._set_vpn_controls_enabled(True)
             else:
+                self.proxy_recovery_pending = True
                 self.vpn_status.setText("●  بازیابی پراکسی ناموفق")
                 self.vpn_detail.setText("هسته VPN متوقف شده، اما پراکسی ویندوز هنوز بازیابی نشده است. برای تلاش مجدد روی قطع اتصال بزن.")
                 self.disconnect_button.setEnabled(True)
                 self._set_vpn_controls_enabled(False)
+
         now = time.strftime("%H:%M")
         self.clock_label.setText(now)
         self.date_label.setText(time.strftime("%A  •  %d %B %Y"))
@@ -1059,16 +1158,25 @@ class KanWindow(QMainWindow):
         root = Path(os.getenv("SystemDrive", "C:") + "\\") if os.name == "nt" else Path("/")
         try:
             disk = psutil.disk_usage(str(root))
-            self.disk_card.set_values(f"{disk.percent:.0f}%", f"{disk.used / (1024**3):.0f} / {disk.total / (1024**3):.0f} GB")
+            disk_used = disk.used / (1024 ** 3)
+            disk_total = disk.total / (1024 ** 3)
+            self.disk_card.set_values(f"{disk.percent:.0f}%", f"{disk_used:.0f} / {disk_total:.0f} GB")
+            self.storage_value_label.setText(f"{disk_used:.0f} / {disk_total:.0f} GB")
+            self.storage_progress.setValue(int(disk.percent))
         except Exception:
             self.disk_card.set_values("--", "فضای دیسک")
+            self.storage_value_label.setText("اطلاعات در دسترس نیست")
+            self.storage_progress.setValue(0)
+
         self.cpu_card.set_values(f"{cpu:.0f}%", f"{psutil.cpu_count(logical=True)} هسته منطقی")
-        self.ram_card.set_values(f"{mem.percent:.0f}%", f"{mem.used / (1024**3):.1f} / {mem.total / (1024**3):.1f} GB")
+        self.ram_card.set_values(f"{mem.percent:.0f}%", f"{mem.used / (1024 ** 3):.1f} / {mem.total / (1024 ** 3):.1f} GB")
+        self.usage_chart.add_sample(cpu, mem.percent)
+
         current = psutil.net_io_counters()
         t = time.time()
         dt = max(0.001, t - self.last_net_time)
-        down = (current.bytes_recv - self.last_net.bytes_recv) / dt
-        up = (current.bytes_sent - self.last_net.bytes_sent) / dt
+        down = max(0, current.bytes_recv - self.last_net.bytes_recv) / dt
+        up = max(0, current.bytes_sent - self.last_net.bytes_sent) / dt
         self.net_card.set_values(format_bytes(down), f"↑ {format_bytes(up)} ارسال")
         self.last_net, self.last_net_time = current, t
         self.uptime_card.set_values(self._uptime_text(), "از آخرین روشن‌شدن سیستم")
@@ -1076,6 +1184,7 @@ class KanWindow(QMainWindow):
             self.gpu_name_cache = self._gpu_name()
         gpu = self.gpu_name_cache
         self.gpu_card.set_values(gpu, "NVIDIA / nvidia-smi" if gpu != "در دسترس نیست" else "درایور یا ابزار NVIDIA پیدا نشد")
+        self._refresh_dashboard_vpn()
 
     def _uptime_text(self) -> str:
         seconds = int(time.time() - psutil.boot_time())
