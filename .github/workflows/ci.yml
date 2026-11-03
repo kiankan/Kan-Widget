@@ -37,7 +37,7 @@ jobs:
           $ParseErrors = $null
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'install.ps1'), [ref]$Tokens, [ref]$ParseErrors) | Out-Null
           if ($ParseErrors.Count -gt 0) {
-            $ParseErrors | Format-List | Out-String | Write-Error
+            throw ($ParseErrors | Format-List | Out-String)
           }
 
       - name: Run parser and UI smoke tests
