@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release version to publish (for example v0.1.0)'
+        description: 'Release version to publish (for example v0.2.0)'
         required: true
         default: 'v0.2.0'
 
